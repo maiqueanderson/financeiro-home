@@ -7,6 +7,7 @@ import OnboardingWizard from './pages/OnboardingWizard';
 import DashboardPage from './pages/DashboardPage';
 import CardsPage from './pages/CardsPage';
 import ReportsPage from './pages/ReportsPage';
+import ProjectionPage from './pages/ProjectionPage';
 
 export default function App() {
   const { user, userProfile, loading } = useAuth();
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/cards" element={<CardsPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/projection" element={<ProjectionPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

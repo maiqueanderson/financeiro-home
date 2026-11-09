@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   Home,
@@ -9,15 +9,19 @@ import {
   EyeOff,
   LogOut,
   Wallet,
+  TrendingUp,
+  LineChart,
 } from 'lucide-react';
 import { useFinance } from '../contexts/FinanceContext';
 import { useAuth } from '../contexts/AuthContext';
 import ExpenseModal from './ExpenseModal';
+import IncomeModal from './IncomeModal';
 
 export default function AppLayout() {
   const { hideValues, toggleHideValues, isQuickExpenseOpen, setIsQuickExpenseOpen } =
     useFinance();
   const { user, logout } = useAuth();
+  const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col pb-24 sm:pb-8">
@@ -77,10 +81,31 @@ export default function AppLayout() {
             >
               Relatórios & Metas
             </NavLink>
+            <NavLink
+              to="/projection"
+              className={({ isActive }) =>
+                `px-3.5 py-2 rounded-xl text-sm font-medium transition ${
+                  isActive
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                }`
+              }
+            >
+              Projeção
+            </NavLink>
           </nav>
 
-          {/* Actions: Botão Privacidade ("Olho"), Novo Gasto Desktop e Logout */}
+          {/* Actions: Botão Privacidade ("Olho"), Receita, Novo Gasto Desktop e Logout */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsIncomeModalOpen(true)}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition"
+              title="Registrar entrada/receita"
+            >
+              <TrendingUp className="w-4 h-4" />
+              <span>Receita</span>
+            </button>
+
             <button
               onClick={() => setIsQuickExpenseOpen(true)}
               className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition"
@@ -154,7 +179,7 @@ export default function AppLayout() {
         <NavLink
           to="/reports"
           className={({ isActive }) =>
-            `flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-xs font-semibold transition ${
+            `flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl text-xs font-semibold transition ${
               isActive ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-700'
             }`
           }
@@ -163,19 +188,29 @@ export default function AppLayout() {
           <span>Relatórios</span>
         </NavLink>
 
-        <button
-          onClick={toggleHideValues}
-          className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-700"
+        <NavLink
+          to="/projection"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl text-xs font-semibold transition ${
+              isActive ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-700'
+            }`
+          }
         >
-          {hideValues ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-          <span>{hideValues ? 'Mostrar' : 'Ocultar'}</span>
-        </button>
+          <LineChart className="w-5 h-5" />
+          <span>Projeção</span>
+        </NavLink>
       </nav>
 
-      {/* Modal de Lançamento Rápido */}
+      {/* Modal de Lançamento Rápido de Despesa */}
       <ExpenseModal
         isOpen={isQuickExpenseOpen}
         onClose={() => setIsQuickExpenseOpen(false)}
+      />
+
+      {/* Modal de Lançamento de Receita */}
+      <IncomeModal
+        isOpen={isIncomeModalOpen}
+        onClose={() => setIsIncomeModalOpen(false)}
       />
     </div>
   );

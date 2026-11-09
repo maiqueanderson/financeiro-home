@@ -31,6 +31,7 @@ export function FinanceProvider({ children }) {
   const [categories, setCategories] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [projectedIncome, setProjectedIncome] = useState(0);
   const [hideValues, setHideValues] = useState(() => {
     return localStorage.getItem('finhome_hide_values') === 'true';
   });
@@ -52,12 +53,20 @@ export function FinanceProvider({ children }) {
       setCategories([]);
       setTransactions([]);
       setInvoices([]);
+      setProjectedIncome(0);
       setLoadingData(false);
       return;
     }
 
     setLoadingData(true);
     const uid = user.uid;
+
+    const unsubUser = onSnapshot(doc(db, 'users', uid), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setProjectedIncome(Number(data.projectedIncome) || 0);
+      }
+    });
 
     const unsubAccounts = onSnapshot(collection(db, 'users', uid, 'accounts'), (snap) => {
       setAccounts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -83,6 +92,7 @@ export function FinanceProvider({ children }) {
     });
 
     return () => {
+      unsubUser();
       unsubAccounts();
       unsubCards();
       unsubCategories();
@@ -337,6 +347,63 @@ export function FinanceProvider({ children }) {
   };
 
   /**
+   * Adiciona uma fatura existente avulsa para um cartão em determinado mês
+   */
+  const addExistingInvoice = async ({ cardId, monthKey, amount, description }) => {
+    if (!user) return;
+    const uid = user.uid;
+    const card = cards.find((c) => c.id === cardId);
+    if (!card) throw new Error('Selecione um cartão de crédito válido.');
+
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount <= 0) {
+      throw new Error('Informe um valor de fatura maior que zero.');
+    }
+
+    const defaultCategory = categories[0];
+    const invoiceId = `${card.id}_${monthKey}`;
+    const batch = writeBatch(db);
+
+    const invRef = doc(db, 'users', uid, 'invoices', invoiceId);
+    batch.set(
+      invRef,
+      {
+        cardId: card.id,
+        cardName: card.name,
+        monthKey,
+        totalAmount: increment(numAmount),
+        status: 'open',
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    const txRef = doc(collection(db, 'users', uid, 'transactions'));
+    const finalDesc = (description || '').trim() || `Saldo / Fatura Existente (${card.name})`;
+
+    batch.set(txRef, {
+      description: finalDesc,
+      amount: numAmount,
+      categoryId: defaultCategory?.id || 'initial',
+      categoryName: defaultCategory?.name || 'Saldo de Fatura',
+      categoryColor: defaultCategory?.color || '#6366f1',
+      date: `${monthKey}-01`,
+      paymentType: 'credit',
+      cardId: card.id,
+      cardName: card.name,
+      invoiceId,
+      invoiceMonth: monthKey,
+      installmentNumber: 1,
+      totalInstallments: 1,
+      status: 'pending',
+      competenceMonth: monthKey,
+      createdAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+  };
+
+  /**
    * Paga a fatura de um cartão de crédito em determinado mês, debitando do banco escolhido
    */
   const payCardInvoice = async ({ cardId, monthKey, totalAmount, accountId }) => {
@@ -383,6 +450,46 @@ export function FinanceProvider({ children }) {
   };
 
   /**
+   * Adiciona receita em uma conta bancária com registro histórico
+   */
+  const addIncome = async ({ description, amount, accountId, date, category }) => {
+    if (!user) return;
+    const uid = user.uid;
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount <= 0) {
+      throw new Error('Informe um valor de receita válido.');
+    }
+
+    const account = accounts.find((a) => a.id === accountId);
+    if (!account) throw new Error('Selecione uma conta bancária para receber o valor.');
+
+    const batch = writeBatch(db);
+    const txRef = doc(collection(db, 'users', uid, 'transactions'));
+    const finalDesc = (description || '').trim() || category || 'Receita / Depósito';
+    const finalDate = date || new Date().toISOString().slice(0, 10);
+
+    batch.set(txRef, {
+      description: finalDesc,
+      amount: numAmount,
+      type: 'income',
+      categoryName: category || 'Receita',
+      date: finalDate,
+      accountId: account.id,
+      accountName: account.name,
+      status: 'paid',
+      competenceMonth: finalDate.slice(0, 7),
+      createdAt: serverTimestamp(),
+    });
+
+    const accRef = doc(db, 'users', uid, 'accounts', account.id);
+    batch.update(accRef, {
+      balance: increment(numAmount),
+    });
+
+    await batch.commit();
+  };
+
+  /**
    * Adiciona receita ou ajuste de saldo em uma conta bancária
    */
   const adjustAccountBalance = async (accountId, newBalance) => {
@@ -407,6 +514,87 @@ export function FinanceProvider({ children }) {
   };
 
   /**
+   * Atualiza dados de um banco (nome e/ou saldo)
+   */
+  const updateAccount = async (accountId, { name, balance }) => {
+    if (!user) return;
+    const accRef = doc(db, 'users', user.uid, 'accounts', accountId);
+    const updates = {};
+    if (name !== undefined) updates.name = name.trim();
+    if (balance !== undefined) updates.balance = Number(balance) || 0;
+    updates.updatedAt = serverTimestamp();
+    await updateDoc(accRef, updates);
+  };
+
+  /**
+   * Exclui um banco
+   */
+  const deleteAccount = async (accountId) => {
+    if (!user) return;
+    const accRef = doc(db, 'users', user.uid, 'accounts', accountId);
+    await deleteDoc(accRef);
+  };
+
+  /**
+   * Atualiza o valor de uma fatura de cartão de crédito em um mês específico
+   */
+  const updateCardInvoiceAmount = async ({ cardId, monthKey, newAmount }) => {
+    if (!user) return;
+    const uid = user.uid;
+    const card = cards.find((c) => c.id === cardId);
+    const numNewAmount = Number(newAmount) || 0;
+    const invoiceId = `${cardId}_${monthKey}`;
+
+    // Busca os lançamentos existentes dessa fatura
+    const invoiceTxs = transactions.filter(
+      (t) => t.paymentType === 'credit' && t.cardId === cardId && t.invoiceMonth === monthKey
+    );
+    const currentTotal = invoiceTxs.reduce((acc, t) => acc + Number(t.amount), 0);
+    const difference = numNewAmount - currentTotal;
+
+    const batch = writeBatch(db);
+
+    // Atualiza o documento consolidado da fatura
+    const invRef = doc(db, 'users', uid, 'invoices', invoiceId);
+    batch.set(
+      invRef,
+      {
+        cardId,
+        cardName: card?.name || 'Cartão',
+        monthKey,
+        totalAmount: numNewAmount,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    // Se houver diferença, cria um lançamento de ajuste de saldo na fatura
+    if (Math.abs(difference) > 0.001) {
+      const txRef = doc(collection(db, 'users', uid, 'transactions'));
+      batch.set(txRef, {
+        description: `Ajuste manual de fatura (${card?.name || 'Cartão'})`,
+        amount: Number(difference.toFixed(2)),
+        categoryId: categories[0]?.id || 'adjustment',
+        categoryName: 'Ajuste de Fatura',
+        categoryColor: '#6366f1',
+        date: `${monthKey}-01`,
+        paymentType: 'credit',
+        cardId,
+        cardName: card?.name || 'Cartão',
+        invoiceId,
+        invoiceMonth: monthKey,
+        installmentNumber: 1,
+        totalInstallments: 1,
+        status: 'pending',
+        competenceMonth: monthKey,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+  };
+
+  /**
    * Adiciona novo cartão avulso
    */
   const addCard = async ({ name, limit, closingDay, dueDay }) => {
@@ -424,12 +612,64 @@ export function FinanceProvider({ children }) {
   };
 
   /**
-   * Atualiza meta de uma categoria
+   * Adiciona nova categoria avulsa
    */
-  const updateCategoryBudget = async (categoryId, monthlyBudget) => {
+  const addCategory = async ({ name, monthlyBudget, color }) => {
+    if (!user) return;
+    const batch = writeBatch(db);
+    const ref = doc(collection(db, 'users', user.uid, 'categories'));
+    batch.set(ref, {
+      name: name.trim(),
+      monthlyBudget: Number(monthlyBudget) || 0,
+      color: color || '#6366f1',
+      createdAt: serverTimestamp(),
+    });
+    await batch.commit();
+  };
+
+  /**
+   * Atualiza dados de uma categoria (nome, meta e cor)
+   */
+  const updateCategory = async (categoryId, { name, monthlyBudget, color }) => {
     if (!user) return;
     const ref = doc(db, 'users', user.uid, 'categories', categoryId);
-    await updateDoc(ref, { monthlyBudget: Number(monthlyBudget) || 0 });
+    const updates = {};
+    if (name !== undefined) updates.name = name.trim();
+    if (monthlyBudget !== undefined) updates.monthlyBudget = Number(monthlyBudget) || 0;
+    if (color !== undefined) updates.color = color;
+    updates.updatedAt = serverTimestamp();
+    await updateDoc(ref, updates);
+  };
+
+  /**
+   * Atualiza meta de uma categoria (retrocompatibilidade)
+   */
+  const updateCategoryBudget = async (categoryId, monthlyBudget) => {
+    return updateCategory(categoryId, { monthlyBudget });
+  };
+
+  /**
+   * Exclui uma categoria
+   */
+  const deleteCategory = async (categoryId) => {
+    if (!user) return;
+    const ref = doc(db, 'users', user.uid, 'categories', categoryId);
+    await deleteDoc(ref);
+  };
+
+  /**
+   * Atualiza o Saldo Projetado Mensal do usuário
+   */
+  const updateProjectedIncome = async (newAmount) => {
+    if (!user) return;
+    const uid = user.uid;
+    const userRef = doc(db, 'users', uid);
+    const numeric = Number(newAmount) || 0;
+    await updateDoc(userRef, {
+      projectedIncome: numeric,
+      updatedAt: serverTimestamp(),
+    });
+    setProjectedIncome(numeric);
   };
 
   /**
@@ -465,6 +705,8 @@ export function FinanceProvider({ children }) {
         categories,
         transactions,
         invoices,
+        projectedIncome,
+        updateProjectedIncome,
         hideValues,
         toggleHideValues,
         isQuickExpenseOpen,
@@ -472,12 +714,20 @@ export function FinanceProvider({ children }) {
         loadingData,
         completeOnboarding,
         addExpense,
+        addIncome,
         payPendingBill,
         payCardInvoice,
         adjustAccountBalance,
         addAccount,
+        updateAccount,
+        deleteAccount,
         addCard,
+        addExistingInvoice,
+        updateCardInvoiceAmount,
+        addCategory,
+        updateCategory,
         updateCategoryBudget,
+        deleteCategory,
         deleteTransaction,
       }}
     >

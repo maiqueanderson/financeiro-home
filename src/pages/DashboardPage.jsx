@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Wallet,
   TrendingDown,
@@ -9,10 +9,12 @@ import {
   CheckCircle2,
   ChevronRight,
   Sparkles,
+  Settings,
 } from 'lucide-react';
 import { useFinance } from '../contexts/FinanceContext';
 import { formatCurrency, getMonthKey, formatMonthLabel } from '../utils/finance';
 import { Link } from 'react-router-dom';
+import BankAccountsModal from '../components/BankAccountsModal';
 
 export default function DashboardPage() {
   const {
@@ -25,6 +27,8 @@ export default function DashboardPage() {
     setIsQuickExpenseOpen,
     payPendingBill,
   } = useFinance();
+
+  const [isBankModalOpen, setIsBankModalOpen] = useState(false);
 
   const currentMonthKey = getMonthKey();
 
@@ -140,22 +144,35 @@ export default function DashboardPage() {
       {/* Cards de Resumo Principal */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Card 1: Saldo Consolidado */}
-        <div className="p-5 rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-lg shadow-emerald-700/20 flex flex-col justify-between">
+        <div className="p-5 rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-lg shadow-emerald-700/20 flex flex-col justify-between relative overflow-hidden group">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-semibold text-emerald-100 uppercase tracking-wider">
               Saldo Consolidado
             </span>
-            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-white">
-              <Wallet className="w-5 h-5" />
-            </div>
+            <button
+              onClick={() => setIsBankModalOpen(true)}
+              title="Gerenciar Bancos e Contas"
+              className="p-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white transition flex items-center gap-1 text-[11px] font-bold"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Gerenciar Bancos</span>
+            </button>
           </div>
           <div>
             <div className="text-2xl sm:text-3xl font-black tracking-tight">
               {formatCurrency(totalBalance, hideValues)}
             </div>
-            <p className="text-xs text-emerald-100 mt-1">
-              Soma de {accounts.length} conta(s) bancária(s)
-            </p>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-xs text-emerald-100">
+                Soma de {accounts.length} conta(s) bancária(s)
+              </p>
+              <button
+                onClick={() => setIsBankModalOpen(true)}
+                className="text-[11px] text-emerald-200 underline hover:text-white font-medium"
+              >
+                Editar saldos
+              </button>
+            </div>
           </div>
         </div>
 
@@ -414,6 +431,12 @@ export default function DashboardPage() {
           </>
         )}
       </div>
+
+      {/* Modal de Gestão de Bancos */}
+      <BankAccountsModal
+        isOpen={isBankModalOpen}
+        onClose={() => setIsBankModalOpen(false)}
+      />
     </div>
   );
 }
